@@ -102,3 +102,24 @@ export interface PackSummary {
   userMessages: number
   modifiedAt: number
 }
+/** One screen recording (computer-use capture). */
+export interface RecordingMeta {
+  id: string
+  title: string
+  createdAt: number
+  endedAt?: number
+  frames: number
+  videoBytes?: number
+}
+
+export interface RecordingSummary extends RecordingMeta {
+  /** Recording directory (host-side). */
+  path: string
+}
+
+/** A skill installed by the plugin (written into a watched skills root). */
+export interface InstalledSkill {
+  name: string
+  description: string
+  path: string
+}

@@ -5,6 +5,7 @@ import type { ReplayRuntimeFaces } from '../mount.tsx'
 import type { SessionMeta, TimelineItem, UserItem } from '../../types.ts'
 import { tt } from '../helpers.ts'
 import { SessionsTab, PacksTab } from './Tabs.tsx'
+import { RecordTab } from './RecordTab.tsx'
 import { Viewer } from './Viewer.tsx'
 import { RunModal } from './RunModal.tsx'
 
@@ -20,7 +21,7 @@ export interface ReplayPanelProps {
 }
 
 export function ReplayPanel({ controller, api, runtime }: ReplayPanelProps) {
-  const [tab, setTab] = useState<'sessions' | 'packs'>('sessions')
+  const [tab, setTab] = useState<'sessions' | 'packs' | 'record'>('sessions')
   const [viewer, setViewer] = useState<ViewerSource | null>(null)
   const [run, setRun] = useState<{ title: string; userMessages: UserItem[] } | null>(null)
 
@@ -44,11 +45,12 @@ export function ReplayPanel({ controller, api, runtime }: ReplayPanelProps) {
           <div className="rrp-tabs">
             <button className="rrp-tab" data-active={tab === 'sessions' ? '' : undefined} onClick={() => setTab('sessions')}>{tt('tab.sessions')}</button>
             <button className="rrp-tab" data-active={tab === 'packs' ? '' : undefined} onClick={() => setTab('packs')}>{tt('tab.packs')}</button>
+            <button className="rrp-tab" data-active={tab === 'record' ? '' : undefined} onClick={() => setTab('record')}>{tt('tab.record')}</button>
           </div>
           <div className="rrp-body">
-            {tab === 'sessions'
-              ? <SessionsTab api={api} onView={setViewer} onRun={openRun} />
-              : <PacksTab api={api} onView={setViewer} onRun={openRun} />}
+            {tab === 'sessions' && <SessionsTab api={api} onView={setViewer} onRun={openRun} />}
+            {tab === 'packs' && <PacksTab api={api} onView={setViewer} onRun={openRun} />}
+            {tab === 'record' && <RecordTab api={api} runtime={runtime} />}
           </div>
         </>
       ) : (

@@ -13,6 +13,8 @@ import z from 'schemastery'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import { makeRoutes } from './routes.ts'
+import { RecordingStore } from './recording-store.ts'
+import { SkillInstaller } from './skill-installer.ts'
 import { SessionStore } from './session-store.ts'
 import { PackStore } from './pack-store.ts'
 
@@ -52,7 +54,7 @@ const DEFAULT_ANNOUNCE = true
 const SECTION_ORDER = 155
 
 /** Model-facing announcement: plugin presence, capabilities, and limits. */
-  export const RECORD_REPLAY_GUIDANCE = '本机已安装 dsh-record-replay 插件（DSH 录制回放）：侧边栏「录制回放」入口；读取 ~/.dsh/sessions 下自动录制的全部会话（session.jsonl.zstd），以时间线方式回放（用户消息 / 助手回复 / 工具调用与结果），可导出可分享的回放包（dsh-replay-pack JSON），可从 GitHub / 队友导入回放包，并可将录制会话的用户消息一键复刻到全新会话重新执行。限制：仅本机已录制会话；导出的回放包含完整对话与工具输出，分享前注意敏感信息。用户提到「录制回放 / record replay / 会话回放 / 复刻会话」时即指本插件，请据此协作。'
+  export const RECORD_REPLAY_GUIDANCE = '本机已安装 dsh-record-replay 插件（DSH 录制回放）：侧边栏「录制回放」入口。能力一（会话）：读取 ~/.dsh/sessions 下自动录制的全部会话，时间线回放、导出/导入可分享的回放包（dsh-replay-pack JSON）、复刻到全新会话重新执行。能力二（录屏 → 生成技能）：在浏览器录制屏幕操作（getDisplayMedia，存 ~/.dsh/recordings，含 webm 视频与采样帧），可回放，并可启动一个 agent 会话逐帧分析（用 describe_image 工具）生成 SKILL.md，写入 ~/.dsh/skills 使之成为可用技能。限制：仅本机数据；回放包含完整对话与工具输出、录屏含屏幕内容，分享/生成前注意敏感信息。用户提到「录制回放 / record replay / 会话回放 / 复刻会话 / 录屏 / 生成技能 / 录屏生成 skill」时即指本插件，请据此协作。'
 
 /**
  * Mount the session store, routes, and announcement.
@@ -73,8 +75,10 @@ export function apply(ctx: Context, config?: Config): void {
 
   const sessions = new SessionStore()
   const packs = new PackStore()
+  const recordings = new RecordingStore()
+  const skills = new SkillInstaller()
 
-  const routes = makeRoutes({ sessions, packs })
+  const routes = makeRoutes({ sessions, packs, recordings, skills })
   let disposeRoutes: (() => void) | undefined
   let disposeSection: (() => void) | undefined
 

@@ -1,16 +1,20 @@
 /**
  * The /api/dsh-record-replay route family: session library, timeline reads,
- * replay-pack export, and the imported-pack store. Every route carries a
- * loopback-only trust fence (mirroring dsh-ssh) — these endpoints read local
- * conversation transcripts, so LAN-exposed dsh web deployments must not
- * serve them.
+ * replay-pack export, the imported-pack store, screen-recording storage
+ * (webm + sampled frames, with Range-enabled video serving) and skill
+ * installation. Every route carries a loopback-only trust fence (mirroring
+ * dsh-ssh) — these endpoints read local transcripts and recordings, so
+ * LAN-exposed dsh web deployments must not serve them.
  */
+import { createReadStream } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
-import type { ReplayPack, SessionMeta, SessionSummary, TimelineItem } from './types.ts'
+import type { InstalledSkill, ReplayPack, RecordingMeta, RecordingSummary, SessionMeta, SessionSummary, TimelineItem } from './types.ts'
 import type { SessionStore } from './session-store.ts'
 import { parseTimeline, extractUserMessages } from './timeline.ts'
 import type { PackStore } from './pack-store.ts'
+import type { RecordingStore } from './recording-store.ts'
+import type { SkillInstaller } from './skill-installer.ts'
 import { buildReplayPack, parseReplayPack, packFileName, serializeReplayPack } from './replay-pack.ts'
 
 /** API base path (the browser half fetches these same-origin). */
@@ -56,6 +60,58 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown | undefined> 
   } catch { return undefined }
 }
 
+/** Read a raw binary request body (undefined when too large). */
+async function readRawBody(req: IncomingMessage, maxBytes: number): Promise<Buffer | undefined> {
+  const chunks: Buffer[] = []
+  let size = 0
+  for await (const chunk of req) {
+    const buffer = chunk as Buffer
+    size += buffer.length
+    if (size > maxBytes) return undefined
+    chunks.push(buffer)
+  }
+  return Buffer.concat(chunks)
+}
+
+/** Serve a video file with HTTP Range support (needed by <video> seeking). */
+function serveVideo(req: IncomingMessage, res: ServerResponse, file: string, size: number): void {
+  const range = req.headers.range
+  if (typeof range === 'string') {
+    const match = /^bytes=(\d*)-(\d*)$/.exec(range)
+    if (match !== null) {
+      let start = match[1] === '' ? 0 : Number(match[1])
+      let end = match[2] === '' ? size - 1 : Number(match[2])
+      if (Number.isNaN(start) || start < 0) start = 0
+      if (Number.isNaN(end) || end >= size) end = size - 1
+      if (start > end || start >= size) {
+        res.writeHead(416, { 'content-range': `bytes */${size}` })
+        res.end()
+        return
+      }
+      res.writeHead(206, {
+        'content-type': 'video/webm',
+        'content-length': String(end - start + 1),
+        'content-range': `bytes ${start}-${end}/${size}`,
+        'accept-ranges': 'bytes',
+        'referrer-policy': 'no-referrer',
+      })
+      const stream = createReadStream(file, { start, end })
+      stream.on('error', () => { res.destroy() })
+      stream.pipe(res)
+      return
+    }
+  }
+  res.writeHead(200, {
+    'content-type': 'video/webm',
+    'content-length': String(size),
+    'accept-ranges': 'bytes',
+    'referrer-policy': 'no-referrer',
+  })
+  const stream = createReadStream(file)
+  stream.on('error', () => { res.destroy() })
+  stream.pipe(res)
+}
+
 /** URL query helper (first value, decoded). */
 function queryParam(url: URL, name: string): string | undefined {
   const value = url.searchParams.get(name)
@@ -66,11 +122,13 @@ function queryParam(url: URL, name: string): string | undefined {
 export interface RecordReplayRoutesDeps {
   sessions: SessionStore
   packs: PackStore
+  recordings: RecordingStore
+  skills: SkillInstaller
 }
 
 /** Build every /api/dsh-record-replay route (exact paths, one handler per path). */
 export function makeRoutes(deps: RecordReplayRoutesDeps): WebRoute[] {
-  const { sessions, packs } = deps
+  const { sessions, packs, recordings, skills } = deps
 
   /** Guard helper: fence + method check. */
   const guard = (req: IncomingMessage, res: ServerResponse, method: string): boolean => {
@@ -216,8 +274,156 @@ export function makeRoutes(deps: RecordReplayRoutesDeps): WebRoute[] {
         writeJson(res, 405, { error: `method not allowed: ${method}` })
       },
     },
+    // ------------------------------------------------ recordings
+    {
+      kind: 'exact',
+      path: `${API_BASE}/recordings`,
+      handler: async (req, res) => {
+        const method = req.method ?? 'GET'
+        if (!isLoopbackRequest(req)) {
+          writeJson(res, 403, { error: 'forbidden: loopback-only' })
+          return
+        }
+        if (method === 'GET') {
+          try {
+            writeJson(res, 200, { recordings: await recordings.list() })
+          } catch (error) {
+            writeJson(res, 500, { error: error instanceof Error ? error.message : String(error) })
+          }
+          return
+        }
+        if (method === 'POST') {
+          const body = await readJsonBody(req)
+          const title = typeof body === 'object' && body !== null && typeof (body as { title?: unknown }).title === 'string'
+            ? (body as { title: string }).title
+            : 'untitled recording'
+          try {
+            writeJson(res, 201, { recording: await recordings.create(title.slice(0, 200)) })
+          } catch (error) {
+            writeJson(res, 500, { error: error instanceof Error ? error.message : String(error) })
+          }
+          return
+        }
+        writeJson(res, 405, { error: `method not allowed: ${method}` })
+      },
+    },
+    {
+      kind: 'exact',
+      path: `${API_BASE}/recording`,
+      handler: async (req, res) => {
+        const method = req.method ?? 'GET'
+        if (!isLoopbackRequest(req)) {
+          writeJson(res, 403, { error: 'forbidden: loopback-only' })
+          return
+        }
+        const url = new URL(req.url ?? '/', 'http://localhost')
+        const id = queryParam(url, 'id')
+        if (id === undefined || id === '') { writeJson(res, 400, { error: 'id query parameter is required' }); return }
+        try {
+          if (method === 'POST') {
+            const part = queryParam(url, 'part')
+            if (part === 'video') {
+              const body = await readRawBody(req, 512 * 1024 * 1024)
+              if (body === undefined) { writeJson(res, 413, { error: 'video body too large' }); return }
+              await recordings.saveVideo(id, body)
+              writeJson(res, 200, { ok: true })
+              return
+            }
+            const name = queryParam(url, 'name')
+            if (name === undefined) { writeJson(res, 400, { error: 'name query parameter is required' }); return }
+            const body = await readRawBody(req, 32 * 1024 * 1024)
+            if (body === undefined) { writeJson(res, 413, { error: 'frame body too large' }); return }
+            const frames = await recordings.addFrame(id, name, body)
+            writeJson(res, 200, { ok: true, frames })
+            return
+          }
+          if (method === 'GET') {
+            const meta = await recordings.meta(id)
+            if (meta === undefined) { writeJson(res, 404, { error: 'recording not found' }); return }
+            writeJson(res, 200, { recording: meta })
+            return
+          }
+          if (method === 'DELETE') {
+            writeJson(res, 200, { ok: await recordings.remove(id) })
+            return
+          }
+          writeJson(res, 405, { error: `method not allowed: ${method}` })
+        } catch (error) {
+          writeJson(res, 400, { error: error instanceof Error ? error.message : String(error) })
+        }
+      },
+    },
+    {
+      kind: 'exact',
+      path: `${API_BASE}/video`,
+      handler: async (req, res) => {
+        if (!guard(req, res, 'GET')) return
+        const url = new URL(req.url ?? '/', 'http://localhost')
+        const id = queryParam(url, 'id')
+        if (id === undefined || id === '') { writeJson(res, 400, { error: 'id query parameter is required' }); return }
+        const size = await recordings.videoSize(id)
+        if (size <= 0) { writeJson(res, 404, { error: 'video not found' }); return }
+        serveVideo(req, res, recordings.videoPath(id), size)
+      },
+    },
+    {
+      kind: 'exact',
+      path: `${API_BASE}/frame`,
+      handler: async (req, res) => {
+        if (!guard(req, res, 'GET')) return
+        const url = new URL(req.url ?? '/', 'http://localhost')
+        const id = queryParam(url, 'id')
+        const name = queryParam(url, 'name')
+        if (id === undefined || name === undefined) { writeJson(res, 400, { error: 'id and name query parameters are required' }); return }
+        const file = recordings.framePath(id, name)
+        if (file === undefined) { writeJson(res, 400, { error: 'invalid frame name' }); return }
+        try {
+          res.writeHead(200, { 'content-type': 'image/png', 'referrer-policy': 'no-referrer', 'cache-control': 'public, max-age=86400' })
+          const stream = createReadStream(file)
+          stream.on('error', () => { res.destroy() })
+          stream.pipe(res)
+        } catch (error) {
+          writeJson(res, 404, { error: error instanceof Error ? error.message : String(error) })
+        }
+      },
+    },
+    // ------------------------------------------------------ skills
+    {
+      kind: 'exact',
+      path: `${API_BASE}/skills`,
+      handler: async (req, res) => {
+        const method = req.method ?? 'GET'
+        if (!isLoopbackRequest(req)) {
+          writeJson(res, 403, { error: 'forbidden: loopback-only' })
+          return
+        }
+        if (method === 'GET') {
+          try {
+            writeJson(res, 200, { skills: await skills.list() })
+          } catch (error) {
+            writeJson(res, 500, { error: error instanceof Error ? error.message : String(error) })
+          }
+          return
+        }
+        if (method === 'POST') {
+          const body = await readJsonBody(req)
+          const content = typeof body === 'object' && body !== null && typeof (body as { content?: unknown }).content === 'string'
+            ? (body as { content: string }).content
+            : ''
+          if (content === '') { writeJson(res, 400, { error: 'content is required' }); return }
+          try {
+            writeJson(res, 201, { skill: await skills.install(content) })
+          } catch (error) {
+            writeJson(res, 400, { error: error instanceof Error ? error.message : String(error) })
+          }
+          return
+        }
+        writeJson(res, 405, { error: `method not allowed: ${method}` })
+      },
+    },
+    // ------------------------------------------- end of routes
   ]
 }
 
 // Type-only re-exports so the browser half can share these shapes.
-export type { ReplayPack, SessionMeta, SessionSummary, TimelineItem }
+export type { InstalledSkill, ReplayPack, RecordingMeta, RecordingSummary, SessionMeta, SessionSummary, TimelineItem }

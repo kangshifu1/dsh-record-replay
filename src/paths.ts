@@ -13,3 +13,8 @@ export const SESSIONS_ROOT = join(DSH_HOME, 'sessions')
 
 /** Where imported replay packs live (this plugin owns this directory). */
 export const PACKS_ROOT = join(DSH_HOME, 'replay-packs')
+/** Where screen recordings live (this plugin owns this directory). */
+export const RECORDINGS_ROOT = join(DSH_HOME, 'recordings')
+
+/** Where generated skills are installed (the user skill root, skill-filesystem scans it). */
+export const SKILLS_ROOT = join(DSH_HOME, 'skills')

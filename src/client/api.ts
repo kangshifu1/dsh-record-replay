@@ -3,7 +3,7 @@
  * Plain fetch, same origin. Types are shared from src/types.ts (pure types
  * only - safe for the client bundle).
  */
-import type { PackSummary, ReplayPack, SessionMeta, SessionSummary, TimelineItem } from '../types.ts'
+import type { InstalledSkill, PackSummary, RecordingMeta, RecordingSummary, ReplayPack, SessionMeta, SessionSummary, TimelineItem } from '../types.ts'
 import { API_BASE } from '../routes.ts'
 
 /** Error carrying the route JSON error message. */
@@ -44,6 +44,78 @@ export interface SessionTimeline {
 
 /** The browser half data entry point. */
 export class ReplayApi {
+  // --------------------------------------------------- recordings
+  async createRecording(title: string): Promise<RecordingMeta> {
+    const response = await fetch(API_BASE + '/recordings', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title }),
+    })
+    const body = await readJson<{ recording: RecordingMeta }>(response)
+    return body.recording
+  }
+
+  async uploadRecordingVideo(id: string, blob: Blob): Promise<void> {
+    const response = await fetch(API_BASE + '/recording' + query({ id, part: 'video' }), {
+      method: 'POST',
+      body: blob,
+    })
+    await readJson<{ ok: boolean }>(response)
+  }
+
+  async uploadRecordingFrame(id: string, name: string, blob: Blob): Promise<number> {
+    const response = await fetch(API_BASE + '/recording' + query({ id, name }), {
+      method: 'POST',
+      body: blob,
+    })
+    const body = await readJson<{ ok: boolean; frames: number }>(response)
+    return body.frames
+  }
+
+  async listRecordings(): Promise<RecordingSummary[]> {
+    const response = await fetch(API_BASE + '/recordings')
+    const body = await readJson<{ recordings: RecordingSummary[] }>(response)
+    return body.recordings
+  }
+
+  async getRecording(id: string): Promise<RecordingMeta> {
+    const response = await fetch(API_BASE + '/recording' + query({ id }))
+    const body = await readJson<{ recording: RecordingMeta }>(response)
+    return body.recording
+  }
+
+  async deleteRecording(id: string): Promise<void> {
+    const response = await fetch(API_BASE + '/recording' + query({ id }), { method: 'DELETE' })
+    await readJson<{ ok: boolean }>(response)
+  }
+
+  /** URL of a recording's video (Range-enabled, for <video> playback). */
+  videoUrl(id: string): string {
+    return API_BASE + '/video' + query({ id })
+  }
+
+  /** URL of one sampled frame (usable by the describe_image tool). */
+  frameUrl(id: string, name: string): string {
+    return window.location.origin + API_BASE + '/frame' + query({ id, name })
+  }
+
+  // ------------------------------------------------------ skills
+  async installSkill(content: string): Promise<InstalledSkill> {
+    const response = await fetch(API_BASE + '/skills', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ content }),
+    })
+    const body = await readJson<{ skill: InstalledSkill }>(response)
+    return body.skill
+  }
+
+  async listSkills(): Promise<InstalledSkill[]> {
+    const response = await fetch(API_BASE + '/skills')
+    const body = await readJson<{ skills: InstalledSkill[] }>(response)
+    return body.skills
+  }
+
   async listSessions(): Promise<SessionSummary[]> {
     const response = await fetch(API_BASE + '/sessions')
     const body = await readJson<{ sessions: SessionSummary[] }>(response)

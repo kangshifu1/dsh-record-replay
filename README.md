@@ -1,6 +1,9 @@
 # dsh-record-replay · DSH 录制回放（Record & Replay）
 
-DSH Web GUI 的「录制回放」插件：DSH 本身会**自动录制**每一场会话（`~/.dsh/sessions` 下的 `session.jsonl.zstd` 完整转录），本插件把「录制」变成可用资产——回放时间线、导出可分享的回放包、导入别人分享的回放包、一键复刻到全新会话重新执行。
+DSH Web GUI 的「录制回放」插件，两套能力：
+
+1. **会话回放**：DSH 自动录制每一场会话（`~/.dsh/sessions/session.jsonl.zstd`），本插件把它变成可用资产——时间线回放、导出/导入可分享的回放包、一键复刻到全新会话重新执行。
+2. **录屏 → 生成技能**（Codex Record & Replay 同款）：在浏览器里录下你的屏幕操作（computer use，`getDisplayMedia` → webm 视频 + 采样帧），回放查看，并让 agent 逐帧分析（`describe_image`）自动生成 `SKILL.md`，安装进 `~/.dsh/skills` 立即可用。
 
 > 类似 Codex 的 record & replay：录制是自动的，本插件补齐「回放 / 分享 / 复刻」这一半。
 
@@ -13,6 +16,8 @@ DSH Web GUI 的「录制回放」插件：DSH 本身会**自动录制**每一场
 | 导出回放包 | 把任意会话导出为单个 `dsh-replay-pack` JSON（`*.replay.json`），git 友好、体积小，可直接放到 GitHub 仓库分享 |
 | 导入回放包 | 导入队友 / GitHub 上分享的 `.replay.json`，存到 `~/.dsh/replay-packs`，可查看、删除、复刻 |
 | 复刻执行 | 把录制会话的**用户消息**按原顺序逐条发送到全新会话，让 agent 真实重新执行一遍（可用于复现、回归、教学、模板化流程） |
+| 录屏 | 浏览器 `getDisplayMedia` 录制屏幕/窗口（webm + 每 2s 采样帧，存 `~/.dsh/recordings`），支持回放与删除 |
+| 生成技能 | 一键让 agent 会话逐帧分析录屏（`describe_image`），输出 SKILL.md 并安装到 `~/.dsh/skills`——新技能被 skill 目录热监听发现，直接进入每个会话的技能目录 |
 
 ## 安装
 
@@ -33,6 +38,7 @@ dsh plugin --profile web add dsh-record-replay
 1. 点侧边栏「录制回放」打开面板。
 2. **会话** tab：任一会话可「回放」（时间线）、「导出」（下载回放包）、「复刻」（开新会话重新执行）。
 3. **回放包** tab：导入 `.replay.json`，管理已导入的包。
+4. **录屏** tab：点「开始录屏」选择屏幕/窗口录制操作；停止后自动上传视频与采样帧。对任意录屏可「回放」，或点「生成技能」——插件开一个 agent 会话，让它逐帧调用 `describe_image` 提炼工作流并产出 SKILL.md，写入 `~/.dsh/skills/<name>/SKILL.md` 后即成为可用技能。
 
 ## 回放包格式
 
@@ -53,7 +59,8 @@ dsh plugin --profile web add dsh-record-replay
 ## 数据与隐私
 
 - **读取**：`~/.dsh/sessions/**/session.jsonl(.zstd)`（DSH 自动录制，本插件只读）。
-- **写入**：`~/.dsh/replay-packs/`（导入的回放包）。
+- **写入**：`~/.dsh/replay-packs/`（导入的回放包）、`~/.dsh/recordings/`（录屏）、`~/.dsh/skills/`（生成的技能）。
+- **录屏隐私**：录屏会捕获屏幕上的一切（含密码输入等），生成技能前请留意；录制全程仅在浏览器本地，上传存于本机 `~/.dsh/recordings`。
 - **注意**：回放包含完整对话与工具输出，可能含密钥 / 敏感信息——分享前请自行脱敏。API 路由仅限 loopback（本机浏览器同源），LAN 暴露的 dsh web 部署不会提供服务。
 
 ## 开发
@@ -68,8 +75,8 @@ pnpm smoke        # 对本机真实会话跑一遍 扫描→解析→建包→�
 
 双面插件（dsh-web-ui 家族约定）：
 
-- **宿主半区**（`src/index.ts`，node）：`SessionStore` 扫描解码会话、`timeline.ts` 蒸馏时间线、`replay-pack.ts` / `pack-store.ts` 回放包、`routes.ts` 提供 `/api/dsh-record-replay/*`，并向 agent 宣告插件存在（system-prompt section）。zstd 解码使用 vendored [fzstd](https://github.com/101arrowz/fzstd)（MIT，支持多帧流），无运行时第三方依赖。
-- **浏览器半区**（`src/client/`）：侧边栏入口（DOM 级注入、自愈）+ 中央列面板（React，单占用者接管，与 task-board / ssh 面板互斥），复刻执行复用官方 `sessions` / `workspaces` 服务。
+- **宿主半区**（`src/index.ts`，node）：`SessionStore` 扫描解码会话、`timeline.ts` 蒸馏时间线、`replay-pack.ts` / `pack-store.ts` 回放包、`recording-store.ts` 录屏存储（webm + 帧，视频带 Range 支持）、`skill-installer.ts` 技能安装（校验 frontmatter 与 skill 命名、写入 `~/.dsh/skills`）、`routes.ts` 提供 `/api/dsh-record-replay/*`，并向 agent 宣告插件存在（system-prompt section）。zstd 解码使用 vendored [fzstd](https://github.com/101arrowz/fzstd)（MIT，支持多帧流），无运行时第三方依赖。
+- **浏览器半区**（`src/client/`）：侧边栏入口（DOM 级注入、自愈）+ 中央列面板（React，单占用者接管，与 task-board / ssh 面板互斥）。会话/回放包/录屏三个 tab；复刻执行与技能生成都复用官方 `sessions` / `workspaces` / `connection` 服务——技能生成会话用 `describe_image` 逐帧看录屏帧（宿主以 HTTP URL 提供），最后把 agent 输出的 SKILL.md 交给宿主安装。
 
 ## License
 

@@ -1,7 +1,7 @@
 {
   "name": "dsh-record-replay",
-  "description": "Record & Replay for the dsh web GUI: browse every automatically recorded session (native session.jsonl.zstd transcripts under ~/.dsh/sessions), replay them as a readable timeline, export shareable replay packs (portable dsh-replay-pack JSON), import packs from GitHub or teammates, and re-run a recorded conversation in a fresh live session. Hot-pluggable - mounted via the profile patch layer, no dsh source changes.",
-  "version": "0.1.0",
+  "description": "Record & Replay for the dsh web GUI: (1) replay every automatically recorded session as a readable timeline, export/import shareable replay packs, re-run a recorded conversation; (2) Codex-style screen recording -> skill generation - record a computer-use session in the browser (getDisplayMedia -> webm + sampled frames), replay it, and have an agent analyze the frames and install a generated SKILL.md into ~/.dsh/skills. Hot-pluggable - mounted via the profile patch layer, no dsh source changes.",
+  "version": "0.2.0",
   "type": "module",
   "engines": { "node": "^22.19.0 || >=24.0.0" },
   "main": "lib/index.js",
