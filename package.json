@@ -84,5 +84,17 @@
     "watch": "tsdown --watch",
     "typecheck": "tsc --noEmit",
     "smoke": "node scripts/smoke.mjs"
-  }
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "record",
+    "replay",
+    "session",
+    "screen-recording",
+    "skill",
+    "workflow",
+    "replay-pack",
+    "codex"
+  ]
 }
