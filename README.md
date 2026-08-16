@@ -7,6 +7,13 @@ DSH Web GUI 的「录制回放」插件，两套能力：
 
 > 类似 Codex 的 record & replay：录制是自动的，本插件补齐「回放 / 分享 / 复刻」这一半。
 
+## 📚 文档
+
+- [README](./README.md) — 说明（能力 / 回放包格式 / 数据与隐私 / 架构）
+- [INSTALL](./INSTALL.md) — 导入 / 安装
+- [USAGE](./USAGE.md) — 使用（会话回放 / 导入导出 / 复刻 / 录屏 / 生成技能）
+- [SKILL](./SKILL.md) — 作为 DSH skill 的用法
+
 ## 能力
 
 | 功能 | 说明 |
